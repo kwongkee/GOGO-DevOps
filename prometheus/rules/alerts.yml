@@ -1,0 +1,214 @@
+# ============================================
+# Prometheus 告警规则
+# GOGO DevOps Platform
+# ============================================
+groups:
+  # ========== 主机告警 ==========
+  - name: host_alerts
+    interval: 30s
+    rules:
+      # CPU告警
+      - alert: HighCPU
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "实例 {{ $labels.instance }} CPU使用率过高"
+          description: "CPU使用率已超过80%达5分钟，当前: {{ $value }}%"
+          runbook_url: "https://wiki.gogo198.cn/runbooks/high-cpu"
+
+      - alert: CriticalCPU
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 95
+        for: 2m
+        labels:
+          severity: critical
+          team: ops
+        annotations:
+          summary: "实例 {{ $labels.instance }} CPU使用率危急"
+          description: "CPU使用率已超过95%达2分钟，当前: {{ $value }}%"
+          action: "立即执行: kubectl top pods 或 ssh排查高负载进程"
+
+      # 内存告警
+      - alert: HighMemory
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "实例 {{ $labels.instance }} 内存使用率过高"
+          description: "内存使用率已超过85%达5分钟，当前: {{ $value | printf \"%.2f\" }}%"
+          runbook_url: "https://wiki.gogo198.cn/runbooks/high-memory"
+
+      - alert: CriticalMemory
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+          team: ops
+        annotations:
+          summary: "实例 {{ $labels.instance }} 内存使用率危急"
+          description: "内存使用率已超过95%达2分钟，当前: {{ $value | printf \"%.2f\" }}%"
+          action: "执行: sync && echo 3 > /proc/sys/vm/drop_caches 或重启服务"
+
+      # 磁盘告警
+      - alert: HighDiskUsage
+        expr: (node_filesystem_size_bytes - node_filesystem_avail_bytes) / node_filesystem_size_bytes * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "实例 {{ $labels.instance }} 磁盘使用率过高"
+          description: "磁盘 {{ $labels.mountpoint }} 使用率超过85%，当前: {{ $value | printf \"%.2f\" }}%"
+          action: "执行: docker system prune -af && rm -f /var/log/messages-*"
+
+      - alert: CriticalDiskUsage
+        expr: (node_filesystem_size_bytes - node_filesystem_avail_bytes) / node_filesystem_size_bytes * 100 > 95
+        for: 5m
+        labels:
+          severity: critical
+          team: ops
+        annotations:
+          summary: "实例 {{ $labels.instance }} 磁盘空间不足"
+          description: "磁盘 {{ $labels.mountpoint }} 使用率超过95%，当前: {{ $value | printf \"%.2f\" }}%"
+          action: "紧急清理: df -h && du -sh /www/wwwroot/*"
+
+      # Swap告警
+      - alert: HighSwap
+        expr: (node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes) / node_memory_SwapTotal_bytes * 100 > 50
+        for: 5m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "实例 {{ $labels.instance }} Swap使用率高"
+          description: "Swap使用率超过50%，当前: {{ $value | printf \"%.2f\" }}%"
+
+      # 负载告警
+      - alert: HighLoad
+        expr: node_load1 / on(instance) node_cpu_count > 1.5
+        for: 10m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "实例 {{ $labels.instance }} 系统负载过高"
+          description: "1分钟负载超过CPU核心数的1.5倍，当前: {{ $value | printf \"%.2f\" }}"
+
+  # ========== Docker容器告警 ==========
+  - name: container_alerts
+    interval: 30s
+    rules:
+      - alert: ContainerDown
+        expr: up{job="docker"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: ops
+        annotations:
+          summary: "容器 {{ $labels.container_name }} 已停止"
+          description: "容器已停止运行超过1分钟"
+          action: "执行: docker ps -a | grep {{ $labels.container_name }}"
+
+      - alert: ContainerHighMemory
+        expr: container_memory_usage_bytes / container_spec_memory_limit_bytes * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "容器 {{ $labels.container_name }} 内存使用率过高"
+          description: "内存使用率超过90%，当前: {{ $value | printf \"%.2f\" }}%"
+          action: "考虑增加内存限制或优化应用"
+
+      - alert: ContainerHighCPU
+        expr: rate(container_cpu_usage_seconds_total[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "容器 {{ $labels.container_name }} CPU使用率过高"
+          description: "CPU使用率超过80%，当前: {{ $value | printf \"%.2f\" }}%"
+
+      - alert: ContainerRestart
+        expr: increase(container_restart_count[1h]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "容器 {{ $labels.container_name }} 发生重启"
+          description: "过去1小时内重启了 {{ $value }} 次"
+          action: "检查: docker logs {{ $labels.container_name }}"
+
+  # ========== 网络告警 ==========
+  - name: network_alerts
+    interval: 60s
+    rules:
+      - alert: HighNetworkTraffic
+        expr: rate(node_network_receive_bytes_total[5m]) > 100000000
+        for: 10m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "实例 {{ $labels.instance }} 网络流量异常"
+          description: "入站流量持续超过100MB/s，当前: {{ $value | printf \"%.2f\" }}B/s"
+          action: "可能遭受DDoS攻击，检查: ss -s"
+
+  # ========== 服务可用性告警 ==========
+  - name: service_alerts
+    interval: 60s
+    rules:
+      - alert: ServiceDown
+        expr: probe_success == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: ops
+        annotations:
+          summary: "服务 {{ $labels.instance }} 不可用"
+          description: "健康检查失败超过2分钟"
+          action: "SSH登录服务器检查服务状态"
+
+      - alert: ServiceSlow
+        expr: probe_duration_seconds > 5
+        for: 5m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "服务 {{ $labels.instance }} 响应缓慢"
+          description: "响应时间超过5秒，当前: {{ $value | printf \"%.2f\" }}秒"
+
+  # ========== 自动化运维触发器 ==========
+  - name: auto_ops_triggers
+    interval: 60s
+    rules:
+      - alert: AutoMemoryOptimization
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          team: ops
+          auto_action: memory_optimize
+        annotations:
+          summary: "触发自动内存优化"
+          description: "内存使用率持续超过80%，可执行自动优化脚本"
+          auto_action_script: "sync && echo 3 > /proc/sys/vm/drop_caches && systemctl restart php-fpm"
+
+      - alert: AutoIPBlock
+        expr: rate(node_netstat_TcpExt_TCPForwardRetransmits[5m]) > 100
+        for: 5m
+        labels:
+          severity: critical
+          team: ops
+          auto_action: ip_block
+        annotations:
+          summary: "检测到异常TCP重传，可能存在攻击"
+          description: "TCP重传率异常，当前: {{ $value | printf \"%.2f\" }}/s"
+          auto_action_script: "/opt/security-scripts/auto-block.sh"
