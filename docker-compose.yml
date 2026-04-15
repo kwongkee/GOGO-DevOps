@@ -1,0 +1,163 @@
+version: '3.8'
+
+# ============================================
+# GOGO DevOps Platform - 完整监控栈
+# ============================================
+# 包含: Prometheus + Grafana + AlertManager + node-exporter + cadvisor
+# 访问地址:
+#   - Grafana: http://39.108.11.214:3030 (admin/admin)
+#   - Prometheus: http://39.108.11.214:9090
+#   - AlertManager: http://39.108.11.214:9093
+#   - node-exporter: http://39.108.11.214:9100
+#   - cadvisor: http://39.108.11.214:8080
+# ============================================
+
+services:
+  # ========== Prometheus 监控核心 ==========
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: gogo-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - ./prometheus/alertmanager.yml:/etc/prometheus/alertmanager.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - gogo-devops
+    depends_on:
+      - alertmanager
+
+  # ========== Grafana 可视化仪表盘 ==========
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: gogo-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=Gogo@DevOps2026
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://39.108.11.214:3030
+    ports:
+      - "3030:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+    networks:
+      - gogo-devops
+    depends_on:
+      - prometheus
+
+  # ========== AlertManager 告警管理 ==========
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: gogo-alertmanager
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    networks:
+      - gogo-devops
+
+  # ========== AlertManager Webhook Receiver (钉钉/邮件通知) ==========
+  alert-webhook:
+    image: python:3.9-alpine
+    container_name: gogo-alert-webhook
+    restart: unless-stopped
+    command: sh -c "pip install flask requests && python /app/webhook.py"
+    ports:
+      - "9094:5000"
+    volumes:
+      - ./alertmanager/webhook.py:/app/webhook.py:ro
+      - ./alertmanager/webhook_config.json:/app/config.json:ro
+    networks:
+      - gogo-devops
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  # ========== node-exporter 主机监控 ==========
+  node-exporter:
+    image: prom/node-exporter:v1.6.1
+    container_name: gogo-node-exporter
+    restart: unless-stopped
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - gogo-devops
+
+  # ========== cAdvisor 容器监控 ==========
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    container_name: gogo-cadvisor
+    restart: unless-stopped
+    command:
+      - '--housekeeping_interval=30s'
+      - '--docker_only=true'
+      - '--store_container_labels=false'
+      - '--allow_dynamic_housekeeping=true'
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - gogo-devops
+
+  # ========== blackbox-exporter 健康检查 ==========
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.23.0
+    container_name: gogo-blackbox
+    restart: unless-stopped
+    command:
+      - '--config.file=/config/blackbox.yml'
+    ports:
+      - "9115:9115"
+    volumes:
+      - ./blackbox/blackbox.yml:/config/blackbox.yml:ro
+    networks:
+      - gogo-devops
+
+  # ========== Unbound DNS 轻量DNS ==========
+  # 用于服务发现
+  consul:
+    image: consul:1.15
+    container_name: gogo-consul
+    restart: unless-stopped
+    command: agent -server -ui -bootstrap-expect=1 -client=0.0.0.0
+    ports:
+      - "8500:8500"
+    networks:
+      - gogo-devops
+
+networks:
+  gogo-devops:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  alertmanager_data:
