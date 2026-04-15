@@ -1,0 +1,86 @@
+# ============================================
+# Prometheus 主配置文件
+# GOGO DevOps Platform
+# ============================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'gogo-production'
+    environment: 'production'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - 'alertmanager:9093'
+
+rule_files:
+  - "/etc/prometheus/rules/*.yml"
+
+scrape_configs:
+  # ========== Prometheus 自身 ==========
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # ========== node-exporter 主机监控 ==========
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: 'node-exporter:9100'
+        replacement: 'gogo-server-39.108.11.214'
+
+  # ========== cadvisor 容器监控 ==========
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    metric_path: /metrics
+
+  # ========== AlertManager ==========
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+
+  # ========== blackbox-exporter 健康检查 ==========
+  - job_name: 'blackbox'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://boss.gogo198.cn
+          - http://shop.gogo198.cn
+          - http://ai.gogo198.net
+          - http://independent.gogo198.com
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 'blackbox-exporter:9115'
+
+  # ========== Docker 容器监控 ==========
+  - job_name: 'docker'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    relabel_configs:
+      - source_labels: [name]
+        target_label: container_name
+        regex: '(.*)'
+        replacement: '${1}'
+
+  # ========== GOGO 应用健康检查 ==========
+  - job_name: 'gogo-services'
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - 'sonarqube:9000'
+          - '1Panel-maxkb:8081'
+        labels:
+          group: 'infrastructure'
