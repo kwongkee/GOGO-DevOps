@@ -1,0 +1,11 @@
+{
+  "dingtalk_webhook": "https://oapi.dingtalk.com/robot/send?access_token=YOUR_DINGTALK_TOKEN",
+  "wechat_webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_WECHAT_KEY",
+  "auto_exec_enabled": true,
+  "auto_exec_whitelist": [
+    "memory_optimize",
+    "ip_block",
+    "service_restart",
+    "docker_restart"
+  ]
+}
