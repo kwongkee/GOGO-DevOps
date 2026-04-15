@@ -1,0 +1,89 @@
+# ============================================
+# AlertManager 配置文件
+# GOGO DevOps Platform
+# ============================================
+
+global:
+  smtp_smarthost: 'smtp.gogo198.cn:465'
+  smtp_from: 'alerts@gogo198.cn'
+  smtp_auth_username: 'alerts@gogo198.cn'
+  smtp_auth_identity: 'alerts@gogo198.cn'
+  smtp_auth_password: 'Gogo@Alerts2026'
+  smtp_require_tls: false
+
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'default-receiver'
+  routes:
+    # 紧急告警直接通知
+    - match:
+        severity: critical
+      receiver: 'critical-receiver'
+      group_wait: 10s
+      repeat_interval: 1h
+    # 自动化运维触发器
+    - match:
+        auto_action: memory_optimize
+      receiver: 'auto-ops-receiver'
+      continue: true
+    - match:
+        auto_action: ip_block
+      receiver: 'auto-ops-receiver'
+      continue: true
+    # 按团队路由
+    - match:
+        team: ops
+      receiver: 'ops-receiver'
+
+receivers:
+  # 默认接收者
+  - name: 'default-receiver'
+    email_configs:
+      - to: '198@gogo198.net'
+        send_resolved: true
+        headers:
+          subject: '【GOGO监控】{{ .GroupLabels.alertname }}'
+    webhook_configs:
+      - url: 'http://alert-webhook:5000/webhook/gogo-monitor'
+        send_resolved: true
+
+  # 紧急告警接收者（钉钉+微信+电话）
+  - name: 'critical-receiver'
+    email_configs:
+      - to: '198@gogo198.net'
+        send_resolved: true
+        headers:
+          subject: '🚨【紧急】GOGO监控告警'
+    webhook_configs:
+      - url: 'http://alert-webhook:5000/webhook/dingtalk'
+        send_resolved: true
+      - url: 'http://alert-webhook:5000/webhook/wechat'
+        send_resolved: true
+      - url: 'http://alert-webhook:5000/webhook/gogo-monitor'
+        send_resolved: true
+
+  # 运维团队接收者
+  - name: 'ops-receiver'
+    email_configs:
+      - to: 'ops@gogo198.cn'
+        send_resolved: true
+    webhook_configs:
+      - url: 'http://alert-webhook:5000/webhook/gogo-monitor'
+        send_resolved: true
+
+  # 自动化运维接收者
+  - name: 'auto-ops-receiver'
+    webhook_configs:
+      - url: 'http://alert-webhook:5000/webhook/auto-execute'
+        send_resolved: false
+
+inhibit_rules:
+  # 当Critical告警触发时，抑制同类型的Warning告警
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']
